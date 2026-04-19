@@ -1,13 +1,13 @@
 const dotenv = require("dotenv");
 const axios = require("axios");
-const { Client, GatewayIntentBits } = require("discord.js");
+const { Client, GatewayIntentBits, Events } = require("discord.js");
 
 dotenv.config();
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL = process.env.GEMINI_MODEL;
-const COMMAND_PREFIX = process.env.COMMAND_PREFIX;
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.1-flash-lite-preview";
+const COMMAND_PREFIX = process.env.COMMAND_PREFIX || "/ask";
 
 // Initial Setup Validation
 if (!DISCORD_TOKEN || !GEMINI_API_KEY) {
@@ -22,12 +22,13 @@ const client = new Client({
   ],
 });
 
-client.once("ready", () => {
-  console.log(`✅ Success! Logged in as ${client.user.tag}`);
+// Using 'ClientReady' instead of 'ready' to fix that warning in your console
+client.once(Events.ClientReady, (c) => {
+  console.log(`✅ Success! Logged in as ${c.user.tag}`);
   console.log(`Using model: ${GEMINI_MODEL}`);
 });
 
-client.on("messageCreate", async (message) => {
+client.on(Events.MessageCreate, async (message) => {
   // Ignore bots and DM messages
   if (message.author.bot || !message.guild) return;
 
@@ -47,22 +48,18 @@ client.on("messageCreate", async (message) => {
     return message.reply(`${askCommand} <your question>`);
   }
 
-  // Show the "Bot is thinking..." status in Discord
   await message.channel.sendTyping();
 
   try {
     const responseText = await queryGeminiWithRetry(prompt);
     await sendLongReply(message, responseText);
   } catch (error) {
-    console.error("Final Error:", error.message);
+    console.error("Final Error Details:", error.response?.data || error.message);
     const detail = error.response?.data?.error?.message || error.message;
-    await message.reply(`❌ I'm having trouble connecting to my brain right now. Please try again in a minute. \n*(Error: ${detail})*`);
+    await message.reply(`❌ I hit a snag! \n*(Error: ${detail})*`);
   }
 });
 
-/**
- * Calls Gemini API with automatic retries for 503 (High Demand) errors.
- */
 async function queryGeminiWithRetry(prompt, retries = 3) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
   
@@ -79,22 +76,20 @@ async function queryGeminiWithRetry(prompt, retries = 3) {
       const response = await axios.post(url, body);
       return response.data?.candidates?.[0]?.content?.parts?.[0]?.text || "I processed that, but had nothing to say.";
     } catch (error) {
-      const isServiceUnavailable = error.response?.status === 503;
+      const status = error.response?.status;
       
-      if (isServiceUnavailable && i < retries - 1) {
-        const waitTime = (i + 1) * 3000; // Wait 3s, then 6s
-        console.warn(`⚠️ Gemini is busy. Retrying in ${waitTime/1000}s... (Attempt ${i + 1}/${retries})`);
+      // 503 is Service Unavailable, 429 is Rate Limited
+      if ((status === 503 || status === 429) && i < retries - 1) {
+        const waitTime = (i + 1) * 3000; 
+        console.warn(`⚠️ Gemini is busy (Status: ${status}). Retrying in ${waitTime/1000}s...`);
         await new Promise(res => setTimeout(res, waitTime));
         continue;
       }
-      throw error; // Rethrow if it's a permanent error (400, 401, 403) or out of retries
+      throw error; 
     }
   }
 }
 
-/**
- * Handles Discord's 2000 character limit by splitting long text.
- */
 async function sendLongReply(message, text) {
   const maxLength = 2000;
   if (text.length <= maxLength) {
