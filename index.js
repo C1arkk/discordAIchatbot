@@ -33,11 +33,10 @@ client.on(Events.MessageCreate, async (message) => {
   if (message.author.bot || !message.guild) return;
 
   const content = message.content.trim();
-  const askCommand = `${COMMAND_PREFIX}ask`;
-  const geminiCommand = `${COMMAND_PREFIX}gemini`;
+  const askCommand = `${COMMAND_PREFIX}don`;
 
   // Check if message starts with your commands
-  if (!content.toLowerCase().startsWith(askCommand) && !content.toLowerCase().startsWith(geminiCommand)) {
+  if (!content.toLowerCase().startsWith(askCommand)) {
     return;
   }
 
